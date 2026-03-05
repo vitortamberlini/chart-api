@@ -5,8 +5,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings, get_settings
 from app.core.db import create_session_factory
+from app.repositories.note import NoteRepository
 from app.repositories.patient import PatientRepository
+from app.services.note import NoteService
 from app.services.patient import PatientService
+from app.use_cases.note import NoteUseCase
 from app.use_cases.patient import PatientUseCase
 
 
@@ -37,3 +40,23 @@ def get_patient_use_case(
     service: PatientService = Depends(get_patient_service),
 ) -> PatientUseCase:
     return PatientUseCase(service)
+
+
+def get_note_repository() -> NoteRepository:
+    return NoteRepository()
+
+
+def get_note_service(
+    repository: NoteRepository = Depends(get_note_repository),
+) -> NoteService:
+    return NoteService(repository)
+
+
+def get_note_use_case(
+    patient_service: PatientService = Depends(get_patient_service),
+    note_service: NoteService = Depends(get_note_service),
+) -> NoteUseCase:
+    return NoteUseCase(
+        patient_service=patient_service,
+        note_service=note_service,
+    )
