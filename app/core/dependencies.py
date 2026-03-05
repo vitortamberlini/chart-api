@@ -7,10 +7,12 @@ from app.core.config import Settings, get_settings
 from app.core.db import create_session_factory
 from app.repositories.note import NoteRepository
 from app.repositories.patient import PatientRepository
+from app.services.llm import AnthropicLLMService, LLMService, OpenAILLMService
 from app.services.note import NoteService
 from app.services.patient import PatientService
 from app.use_cases.note import NoteUseCase
 from app.use_cases.patient import PatientUseCase
+from app.use_cases.summary import SummaryUseCase
 
 
 def get_session_factory(
@@ -24,6 +26,14 @@ async def get_db_session(
 ) -> AsyncGenerator[AsyncSession, None]:
     async with session_factory() as session:
         yield session
+
+
+def get_llm_service(
+    settings: Settings = Depends(get_settings),
+) -> LLMService:
+    if settings.LLM_PROVIDER == "openai":
+        return OpenAILLMService()
+    return AnthropicLLMService(api_key=settings.ANTHROPIC_API_KEY)
 
 
 def get_patient_repository() -> PatientRepository:
@@ -55,8 +65,18 @@ def get_note_service(
 def get_note_use_case(
     patient_service: PatientService = Depends(get_patient_service),
     note_service: NoteService = Depends(get_note_service),
+    llm_service: LLMService = Depends(get_llm_service),
 ) -> NoteUseCase:
     return NoteUseCase(
         patient_service=patient_service,
         note_service=note_service,
+        llm_service=llm_service,
     )
+
+
+def get_summary_use_case(
+    patient_service: PatientService = Depends(get_patient_service),
+    note_service: NoteService = Depends(get_note_service),
+    llm_service: LLMService = Depends(get_llm_service),
+) -> SummaryUseCase:
+    return SummaryUseCase(patient_service, note_service, llm_service)

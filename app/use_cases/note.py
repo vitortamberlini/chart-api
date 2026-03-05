@@ -3,6 +3,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.note import NoteCreate, NoteResponse
+from app.services.llm import LLMService
 from app.services.note import NoteService
 from app.services.patient import PatientService
 
@@ -12,9 +13,11 @@ class NoteUseCase:
         self,
         patient_service: PatientService,
         note_service: NoteService,
+        llm_service: LLMService,
     ) -> None:
         self._patient_service = patient_service
         self._note_service = note_service
+        self._llm_service = llm_service
 
     async def create(
         self,
@@ -24,7 +27,10 @@ class NoteUseCase:
         source_filename: str | None = None,
     ) -> NoteResponse:
         await self._patient_service.get_by_id(session, patient_id)
-        return await self._note_service.create(session, patient_id, data, source_filename)
+        note = await self._note_service.create(session, patient_id, data, source_filename)
+        note_type = await self._llm_service.classify_note(note.content)
+        await self._note_service.update_note_type(session, note.id, note_type)
+        return note.model_copy(update={"note_type": note_type})
 
     async def get_by_patient(
         self,

@@ -20,6 +20,11 @@ class NoteService:
     ) -> NoteResponse:
         return await self._repo.create(session, patient_id, data, source_filename)
 
+    async def update_note_type(
+        self, session: AsyncSession, note_id: uuid.UUID, note_type: str
+    ) -> None:
+        await self._repo.update_note_type(session, note_id, note_type)
+
     async def get_by_patient(
         self, session: AsyncSession, patient_id: uuid.UUID
     ) -> list[NoteResponse]:
