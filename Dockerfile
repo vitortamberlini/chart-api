@@ -5,13 +5,14 @@ RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 
 WORKDIR /app
 
-# Install dependencies (no dev extras)
+# Install dependencies including dev extras (pytest, httpx, ruff)
 COPY pyproject.toml .
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir ".[dev]"
 
 # Copy application source
 COPY app/ app/
 COPY scripts/ scripts/
+COPY tests/ tests/
 COPY alembic.ini .
 COPY migrations/ migrations/
 
