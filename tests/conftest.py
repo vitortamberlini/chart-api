@@ -1,4 +1,6 @@
 import pytest_asyncio
+
+from app.core.config import get_settings
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -10,8 +12,9 @@ from app.main import app
 from app.schemas.patient import PatientResponse
 from app.schemas.summary import SummaryResponse
 
-TEST_DB_URL = "postgresql+asyncpg://postgres:postgres@postgres/chartapi_test"
-ADMIN_DB_URL = "postgresql+asyncpg://postgres:postgres@postgres/postgres"
+_db_base = get_settings().DATABASE_URL.rsplit("/", 1)[0]
+TEST_DB_URL = f"{_db_base}/chartapi_test"
+ADMIN_DB_URL = f"{_db_base}/postgres"
 
 
 class MockLLMService:
