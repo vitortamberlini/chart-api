@@ -1,9 +1,12 @@
-.idea/
-.venv/
 .env
+.env.example
+.git/
+.gitignore
+.claude/
 __pycache__/
 *.py[cod]
 *.egg-info/
+.venv/
 dist/
 .pytest_cache/
-.ruff_cache/
+tests/
