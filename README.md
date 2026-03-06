@@ -4,17 +4,30 @@ A clinical data API that ingests SOAP notes, classifies them with an LLM, and ge
 
 ---
 
-## Quick Start
+## Prerequisites
 
+- [Docker](https://docs.docker.com/get-docker/) + [Docker Compose](https://docs.docker.com/compose/install/)
+- GNU Make (`brew install make` on macOS; WSL recommended on Windows)
+- An Anthropic API key — get one at [console.anthropic.com](https://console.anthropic.com)
+
+---
+
+## Quick Start
 ```bash
 cp .env.example .env          # add your ANTHROPIC_API_KEY
 make up                       # build + start (api + postgres)
 make migrate                  # run Alembic migrations
-make seed                     # create 2 patients with 6 SOAP notes each
+make seed                     # create 2 patients with 3 SOAP notes each
 ```
 
-Then generate a summary:
+The seed script creates the following patients (use their IDs in subsequent requests):
 
+| Name | DOB |
+|------|-----|
+| James R. Mitchell | 1955-04-12 |
+| Emily G. Williams | 1996-12-02 |
+
+Then generate a summary:
 ```bash
 # 1. List patients to get an ID
 curl http://localhost:8000/patients
@@ -24,164 +37,40 @@ curl "http://localhost:8000/patients/<id>/summary?audience=clinician&verbosity=s
 ```
 
 Expected response:
-
 ```json
 {
-  "patient": { "id": "...", "name": "James R. Mitchell", "dob": "1955-04-12", "mrn": "MRN-3AC7DE" },
-  "summary": "68-year-old male admitted for inferior STEMI...",
-  "key_diagnoses": ["Inferior STEMI", "Hypertension", "Hyperlipidemia"],
-  "current_medications": ["Aspirin 81mg", "Atorvastatin 80mg", "Metoprolol 25mg"],
-  "note_count": 3,
-  "generated_at": "2024-06-20T10:00:00Z"
+    "patient": {
+        "id": "...",
+        "name": "James R. Mitchell",
+        "dob": "1955-04-12",
+        "mrn": "MRN-3AC7DE"
+    },
+    "summary": "68-year-old male admitted for inferior STEMI...",
+    "key_diagnoses": [
+        "Inferior STEMI",
+        "Hypertension",
+        "Hyperlipidemia"
+    ],
+    "current_medications": [
+        "Aspirin 81mg",
+        "Atorvastatin 80mg",
+        "Metoprolol 25mg"
+    ],
+    "note_count": 3,
+    "generated_at": "<ISO timestamp>"
 }
 ```
 
----
-
-## API Reference
-
-All endpoints are under `http://localhost:8000`. Error responses always include a `detail` field.
-
-### Health
-
-| Method | Path | Status | Description |
-|--------|------|--------|-------------|
-| GET | `/health` | 200 | Returns `{"status": "ok"}`. Pings the database. |
-
-### Patients
-
-| Method | Path | Status | Description |
-|--------|------|--------|-------------|
-| GET | `/patients` | 200 | List patients (paginated, sortable, searchable) |
-| POST | `/patients` | 201 | Create a patient |
-| GET | `/patients/{id}` | 200 | Get a patient by ID |
-| PUT | `/patients/{id}` | 200 | Update a patient |
-| DELETE | `/patients/{id}` | 204 | Soft-delete a patient |
-
-**List patients** — query params: `page` (default 1), `per_page` (default 20, max 100), `sort_by` (`name`\|`created_at`\|`dob`), `order` (`asc`\|`desc`), `search` (partial name match).
-
+### Without Make
 ```bash
-curl "http://localhost:8000/patients?page=1&per_page=5&search=Mitchell"
-
-curl -X POST http://localhost:8000/patients \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Alice Carter", "dob": "1980-03-15"}'
-
-curl -X PUT http://localhost:8000/patients/<id> \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Alice Carter-Smith"}'
-
-curl -X DELETE http://localhost:8000/patients/<id>
+docker compose up --build -d
+docker compose exec api alembic upgrade head
+docker compose exec api python scripts/seed.py
 ```
-
-**Patient response shape:**
-```json
-{
-  "id": "uuid",
-  "name": "Alice Carter",
-  "dob": "1980-03-15",
-  "mrn": "MRN-A1B2C3",
-  "created_at": "2024-01-01T00:00:00Z",
-  "updated_at": null,
-  "deleted_at": null
-}
-```
-
-### Notes
-
-Notes belong to a patient. The `note_type` field is set automatically via LLM classification on creation.
-
-| Method | Path | Status | Description |
-|--------|------|--------|-------------|
-| GET | `/patients/{id}/notes` | 200 | List notes for a patient |
-| POST | `/patients/{id}/notes` | 201 | Create a note (JSON or file upload) |
-| DELETE | `/patients/{id}/notes/{note_id}` | 204 | Soft-delete a note |
-
-**Create note — JSON body:**
-```bash
-curl -X POST http://localhost:8000/patients/<id>/notes \
-  -H "Content-Type: application/json" \
-  -d '{
-    "content": "SUBJECTIVE: Patient presents for follow-up...",
-    "taken_at": "2024-01-15T10:00:00Z"
-  }'
-```
-
-**Create note — file upload (multipart/form-data):**
-```bash
-curl -X POST http://localhost:8000/patients/<id>/notes \
-  -F "file=@/path/to/soap_note.txt" \
-  -F "taken_at=2024-01-15T10:00:00Z"
-```
-
-`taken_at` may also be passed as a query param (`?taken_at=2024-01-15T10:00:00Z`) or omitted (defaults to now).
-
-**Note response shape:**
-```json
-{
-  "id": "uuid",
-  "patient_id": "uuid",
-  "content": "SUBJECTIVE: ...",
-  "note_type": "follow_up",
-  "source_filename": "soap_note.txt",
-  "taken_at": "2024-01-15T10:00:00Z",
-  "created_at": "2024-01-15T10:00:01Z",
-  "deleted_at": null
-}
-```
-
-**Note types** (assigned by LLM): `admission` | `follow_up` | `discharge` | `procedure` | `routine`
-
-### Summary
-
-```bash
-GET /patients/{id}/summary?audience=clinician&verbosity=standard
-```
-
-| Param | Values | Default |
-|-------|--------|---------|
-| `audience` | `clinician`, `family` | `clinician` |
-| `verbosity` | `brief`, `standard`, `detailed` | `standard` |
-
-```bash
-# Clinician brief
-curl "http://localhost:8000/patients/<id>/summary?audience=clinician&verbosity=brief"
-
-# Family-friendly standard
-curl "http://localhost:8000/patients/<id>/summary?audience=family"
-```
-
-**Summary response shape:**
-```json
-{
-  "patient": { "id": "...", "name": "...", "dob": "...", "mrn": "..." },
-  "summary": "Narrative text...",
-  "key_diagnoses": ["Diagnosis A", "Diagnosis B"],
-  "current_medications": ["Med A 10mg daily"],
-  "note_count": 3,
-  "generated_at": "2024-06-20T10:00:00Z"
-}
-```
-
----
-
-## Running Tests
-
-Tests run inside Docker against a dedicated `chartapi_test` database. The LLM is mocked — no API credits needed.
-
-```bash
-make test
-```
-
-The test suite (17 tests) covers:
-- Patient CRUD (list, create, get, update, delete, pagination, search, 404)
-- Note creation via JSON and file upload, listing, deletion, and patient-not-found guard
-- Summary structured response, 404, and both audience variants
 
 ---
 
 ## Architecture
-
 ```
 HTTP Request
      │
@@ -222,6 +111,133 @@ HTTP Request
 | Repositories | `app/repositories/` | SQLAlchemy queries. Soft-delete filtering. Returns Pydantic models. |
 | Core | `app/core/` | Config (pydantic-settings), DB engine, FastAPI dependency providers. |
 | Middleware | `app/middleware/` | Structured JSON request/response logging via structlog. |
+
+---
+
+## API Reference
+
+Base URL: `http://localhost:8000`. All error responses include a `detail` field.
+
+### Health
+
+| Method | Path | Status | Params | Description |
+|--------|------|--------|--------|-------------|
+| GET | `/health` | 200 | — | Pings the database and returns `{"status": "ok"}` |
+
+### Patients
+
+| Method | Path | Status | Params | Description |
+|--------|------|--------|--------|-------------|
+| GET | `/patients` | 200 | `page` (default: 1), `per_page` (default: 20, max: 100), `sort_by` (`name`\|`created_at`\|`dob`, default: `name`), `order` (`asc`\|`desc`, default: `asc`), `search` (partial name match) | List patients |
+| POST | `/patients` | 201 | Body: `name` (string), `dob` (date) | Create a patient |
+| GET | `/patients/{id}` | 200 | — | Get a patient by ID |
+| PUT | `/patients/{id}` | 200 | Body: `name` (string, optional), `dob` (date, optional) | Update a patient |
+| DELETE | `/patients/{id}` | 204 | — | Soft-delete a patient |
+
+**Examples:**
+```bash
+curl "http://localhost:8000/patients?page=1&per_page=5&search=Mitchell&sort_by=name&order=asc"
+
+curl -X POST http://localhost:8000/patients \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Alice Carter", "dob": "1980-03-15"}'
+
+curl -X PUT http://localhost:8000/patients/<id> \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Alice Carter-Smith"}'
+
+curl -X DELETE http://localhost:8000/patients/<id>
+```
+
+**Response shape:**
+```json
+{
+    "id": "uuid",
+    "name": "Alice Carter",
+    "dob": "1980-03-15",
+    "mrn": "MRN-A1B2C3",
+    "created_at": "<ISO timestamp>",
+    "updated_at": null,
+    "deleted_at": null
+}
+```
+
+### Notes
+
+`note_type` is assigned automatically by the LLM on creation (`admission` | `follow_up` | `discharge` | `procedure` | `routine`).
+
+| Method | Path | Status | Params | Description |
+|--------|------|--------|--------|-------------|
+| GET | `/patients/{id}/notes` | 200 | — | List notes for a patient, ordered by `taken_at` ASC |
+| POST | `/patients/{id}/notes` | 201 | Body (JSON): `content` (string), `taken_at` (datetime) — or multipart: `file` (text file), `taken_at` (form field or query param, defaults to now) | Create a note |
+| DELETE | `/patients/{id}/notes/{note_id}` | 204 | — | Soft-delete a note |
+
+**Examples:**
+```bash
+# JSON body
+curl -X POST http://localhost:8000/patients/<id>/notes \
+  -H "Content-Type: application/json" \
+  -d '{"content": "SUBJECTIVE: Patient presents for follow-up...", "taken_at": "2024-01-15T10:00:00Z"}'
+
+# File upload
+curl -X POST http://localhost:8000/patients/<id>/notes \
+  -F "file=@/path/to/soap_note.txt" \
+  -F "taken_at=2024-01-15T10:00:00Z"
+
+curl -X DELETE http://localhost:8000/patients/<id>/notes/<note_id>
+```
+
+**Response shape:**
+```json
+{
+    "id": "uuid",
+    "patient_id": "uuid",
+    "content": "SUBJECTIVE: ...",
+    "note_type": "follow_up",
+    "source_filename": "soap_note.txt",
+    "taken_at": "2024-01-15T10:00:00Z",
+    "created_at": "<ISO timestamp>",
+    "deleted_at": null
+}
+```
+
+### Summary
+
+| Method | Path | Status | Params | Description |
+|--------|------|--------|--------|-------------|
+| GET | `/patients/{id}/summary` | 200 | `audience` (`clinician`\|`family`, default: `clinician`), `verbosity` (`brief`\|`standard`\|`detailed`, default: `standard`) | Generate a clinical summary from all notes |
+
+**Examples:**
+```bash
+curl "http://localhost:8000/patients/<id>/summary?audience=clinician&verbosity=standard"
+curl "http://localhost:8000/patients/<id>/summary?audience=family&verbosity=brief"
+```
+
+**Response shape:**
+```json
+{
+    "patient": {"id": "...", "name": "...", "dob": "...", "mrn": "..."},
+    "summary": "Narrative text...",
+    "key_diagnoses": ["Diagnosis A", "Diagnosis B"],
+    "current_medications": ["Med A 10mg daily"],
+    "note_count": 3,
+    "generated_at": "<ISO timestamp>"
+}
+```
+
+---
+
+## Running Tests
+
+Tests run inside Docker against a dedicated `chartapi_test` database. The LLM is mocked — no API credits needed.
+```bash
+make test
+```
+
+The test suite covers:
+- Patient CRUD (list, create, get, update, delete, pagination, search, 404)
+- Note creation via JSON and file upload, listing, deletion, and patient-not-found guard
+- Summary structured response, 404, and both audience variants
 
 ---
 

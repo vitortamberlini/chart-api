@@ -11,7 +11,10 @@ from app.schemas.patient import PatientCreate, PatientResponse, PatientUpdate
 class PatientRepository:
     async def get_by_id(self, session: AsyncSession, id: uuid.UUID) -> PatientResponse | None:
         result = await session.execute(
-            select(Patient).where(Patient.id == id, Patient.deleted_at.is_(None))
+            select(Patient).where(
+                Patient.id == id,
+                Patient.deleted_at.is_(None),
+            )
         )
         row = result.scalar_one_or_none()
         return PatientResponse.model_validate(row) if row else None
@@ -59,7 +62,10 @@ class PatientRepository:
         self, session: AsyncSession, id: uuid.UUID, data: PatientUpdate
     ) -> PatientResponse | None:
         result = await session.execute(
-            select(Patient).where(Patient.id == id, Patient.deleted_at.is_(None))
+            select(Patient).where(
+                Patient.id == id,
+                Patient.deleted_at.is_(None),
+            )
         )
         patient = result.scalar_one_or_none()
         if not patient:
@@ -77,7 +83,10 @@ class PatientRepository:
 
     async def delete(self, session: AsyncSession, id: uuid.UUID) -> bool:
         result = await session.execute(
-            select(Patient).where(Patient.id == id, Patient.deleted_at.is_(None))
+            select(Patient).where(
+                Patient.id == id,
+                Patient.deleted_at.is_(None),
+            )
         )
         patient = result.scalar_one_or_none()
         if not patient:

@@ -11,7 +11,7 @@ Usage:
 import asyncio
 import re
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from pathlib import Path
 
 from sqlalchemy import select
@@ -26,11 +26,13 @@ from app.repositories.note import NoteRepository
 from app.repositories.patient import PatientRepository
 from app.schemas.note import NoteCreate
 from app.schemas.patient import PatientCreate
+from app.services.llm import AnthropicLLMService, OpenAILLMService
+from app.services.note import NoteService
+from app.services.patient import PatientService
+from app.use_cases.note import NoteUseCase
+from app.use_cases.patient import PatientUseCase
 
 SOAP_DIR = Path(__file__).parent / "soap_notes"
-
-_patient_repo = PatientRepository()
-_note_repo = NoteRepository()
 
 PATIENTS = [
     {
@@ -58,6 +60,25 @@ async def seed() -> None:
     engine = create_async_engine(settings.DATABASE_URL, echo=False)
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
+    llm_service = (
+        OpenAILLMService()
+        if settings.LLM_PROVIDER == "openai"
+        else AnthropicLLMService(api_key=settings.ANTHROPIC_API_KEY)
+    )
+
+    patient_repository = PatientRepository()
+    note_repository = NoteRepository()
+
+    patient_service = PatientService(patient_repository)
+    note_service = NoteService(note_repository)
+
+    patient_use_case = PatientUseCase(patient_service)
+    note_use_case = NoteUseCase(
+        patient_service=patient_service,
+        note_service=note_service,
+        llm_service=llm_service,
+    )
+
     async with factory() as session:
         for spec in PATIENTS:
             result = await session.execute(
@@ -72,7 +93,7 @@ async def seed() -> None:
                 print(f"Skipping: '{spec['name']}' already exists (id={existing.id})")
                 continue
 
-            patient = await _patient_repo.create(
+            patient = await patient_use_case.create(
                 session, PatientCreate(name=spec["name"], dob=spec["dob"])
             )
             print(f"Created patient: '{patient.name}' (id={patient.id}, mrn={patient.mrn})")
@@ -80,13 +101,13 @@ async def seed() -> None:
             for fname in spec["notes"]:
                 text = (SOAP_DIR / fname).read_text()
                 taken_at = _parse_taken_at(text)
-                await _note_repo.create(
+                note = await note_use_case.create(
                     session,
                     patient.id,
                     NoteCreate(content=text, taken_at=taken_at),
                     source_filename=fname,
                 )
-                print(f"  Added note: {fname} (taken_at={taken_at.date()})")
+                print(f"  Added note: {fname} (taken_at={taken_at.date()}, note_type={note.note_type})")
 
     await engine.dispose()
     print("\nSeeding complete.")
